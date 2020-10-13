@@ -61,7 +61,7 @@ if __name__ == "__main__":
     
     in_channels=1
     embed_size=64
-    time_num = 288  #1天时间间隔数
+    time_num = 288  #1天时间间隔数，每个间隔 24 * 60 / 288 = 5 min
     num_layers=1
     T_dim=12
     output_T_dim=3
