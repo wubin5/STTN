@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Created on Wed Oct  7 18:25:49 2020
 
@@ -13,35 +13,16 @@ import numpy as np
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    '''
-    x1 = torch.tensor(                       # x shape[C, N, T] 
-            [
-             [
-             [6.5,  5, 6, 4, 3, 9, 5, 2, 0], 
-             [4, 8, 7, 3, 4, 5, 6.5, 7, 2],
-             [5, 6, 8, 9.1, 21, 4, 4, 6,20],
-             [2, 6, 8, 1, 3, 0, 2.2, 2, 5]
-             ]
-            ]
-    ).to(device)
-    
-    Aa = torch.tensor([
-            [1,0,1,0],
-            [0,1,0,1],
-            [2,0,1,0],
-            [1,2,0,1.]
-            ]
-    ).to(device)        #邻接矩阵adj'''
 
-    days = 10
-    val_days = 1    
+    days = 10       #选择训练的天数
+    val_days = 1    #选择验证的天数
     
     train_num = 288*days
     val_num = 288*val_days
     row_num = train_num + val_num
 
     v = pd.read_csv("PEMSD7/V_25.csv", nrows = row_num, header= -1)
-    A = pd.read_csv("PEMSD7/W_25.csv", header= -1)
+    A = pd.read_csv("PEMSD7/W_25.csv", header= -1)          #获取邻接矩阵
     
 
     A = np.array(A)
@@ -50,41 +31,49 @@ if __name__ == "__main__":
     v = np.array(v)
     v = v.T
     v = torch.tensor(v, dtype=torch.float32)
+    # 最终 v shape:[N, T]。  N=25, T=row_num
     
     
-    '''
-    x = v[:, 0:12]
-    y = v[:, 12:]
+    # 模型参数
+    in_channels=1   # 输入通道数。只有速度信息，所以通道为1
+    embed_size=64   # Transformer通道数
+    time_num = 288  # 1天时间间隔数量
+    num_layers=1    # Spatial-temporal block 堆叠层数
+    T_dim=12        # 输入时间维度。 输入前1小时数据，所以 60min/5min = 12
+    output_T_dim=3  # 输出时间维度。预测未来15,30,45min速度
+    heads=1         # transformer head 数量。 时、空transformer头数量相同
     
-    x = x.unsqueeze(0)
-    in_channels = v.shape[0]'''
+    # model input shape: [1, N, T]   
+    # 1:初始通道数, N:传感器数量, T:时间数量
+    # model output shape: [N, T]    
+    model = STTransformer(
+        in_channels, 
+        embed_size, 
+        time_num, 
+        num_layers, 
+        T_dim, 
+        output_T_dim, 
+        heads
+    )   
     
-    in_channels=1
-    embed_size=64
-    time_num = 288  #1天时间间隔数，每个间隔 24 * 60 / 288 = 5 min
-    num_layers=1
-    T_dim=12
-    output_T_dim=3
-    heads=1
-    
-    
-    model = STTransformer(in_channels, embed_size, time_num, num_layers, T_dim, output_T_dim, heads)   
-    
-    #optimizer = torch.optim.SGD(model.parameters(), lr=0.000001)  #小数点后8位
+    # optimizer, lr, loss按论文要求
     optimizer = torch.optim.RMSprop(model.parameters(), lr=0.001)
-    criterion = nn.L1Loss()                             #论文要求
+    criterion = nn.L1Loss()                             
     
     
-    for i in range(train_num - 15):
+    #   ----训练部分----
+    # i表示遍历到的具体时间
+    for i in range(train_num - 21):
         x = v[:, i:i+12]
-        x = x.unsqueeze(0)
-        y = v[:, i+12:i+15]
+        x = x.unsqueeze(0)        
+        y = v[:, i+14:i+21:3]
+        # x shape:[1, N, T_dim] 
+        # y shape:[N, output_T_dim]
         
         out = model(x, A, i)
-        loss = criterion(out, y ) 
+        loss = criterion(out, y) 
         
         if i%100 == 0:
-            #print("out", out)
             print("MAE loss:", loss)
         
         #常规操作
@@ -93,7 +82,9 @@ if __name__ == "__main__":
         optimizer.step() 
         
     
-    #print("输出形状", out.shape)
+    
+    
+    #保存模型
     torch.save(model, "model.pth")
     
     
