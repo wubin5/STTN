@@ -35,6 +35,7 @@ if __name__ == "__main__":
     
     
     # 模型参数
+    A = A           # 邻接矩阵
     in_channels=1   # 输入通道数。只有速度信息，所以通道为1
     embed_size=64   # Transformer通道数
     time_num = 288  # 1天时间间隔数量
@@ -47,6 +48,7 @@ if __name__ == "__main__":
     # 1:初始通道数, N:传感器数量, T:时间数量
     # model output shape: [N, T]    
     model = STTransformer(
+        A,
         in_channels, 
         embed_size, 
         time_num, 
@@ -63,17 +65,17 @@ if __name__ == "__main__":
     
     #   ----训练部分----
     # i表示遍历到的具体时间
-    for i in range(train_num - 21):
-        x = v[:, i:i+12]
+    for t in range(train_num - 21):
+        x = v[:, t:t+12]
         x = x.unsqueeze(0)        
-        y = v[:, i+14:i+21:3]
+        y = v[:, t+14:t+21:3]
         # x shape:[1, N, T_dim] 
         # y shape:[N, output_T_dim]
         
-        out = model(x, A, i)
+        out = model(x, t)
         loss = criterion(out, y) 
         
-        if i%100 == 0:
+        if t%100 == 0:
             print("MAE loss:", loss)
         
         #常规操作

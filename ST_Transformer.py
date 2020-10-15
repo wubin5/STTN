@@ -125,8 +125,13 @@ class TSelfAttention(nn.Module):
     
     
 class STransformer(nn.Module):
-    def __init__(self, embed_size, heads, dropout, forward_expansion):
+    def __init__(self, embed_size, heads, adj, dropout, forward_expansion):
         super(STransformer, self).__init__()
+        # Spatial Embedding
+        self.adj = adj
+        self.D_S = nn.Parameter(adj)
+        self.embed_liner = nn.Linear(adj.shape[0], embed_size)
+        
         self.attention = SSelfAttention(embed_size, heads)
         self.norm1 = nn.LayerNorm(embed_size)
         self.norm2 = nn.LayerNorm(embed_size)
@@ -139,44 +144,45 @@ class STransformer(nn.Module):
         
         # 调用GCN
         self.gcn = GCN(embed_size, embed_size*2, embed_size, dropout)  
-        self.norm_adj = nn.InstanceNorm2d(1)  # 对邻接矩阵归一化
+        self.norm_adj = nn.InstanceNorm2d(1)    # 对邻接矩阵归一化
 
         self.dropout = nn.Dropout(dropout)
-        self.out1_fc = nn.Linear(embed_size, embed_size)
-        self.out2_fc = nn.Linear(embed_size, embed_size)
+        self.fs = nn.Linear(embed_size, embed_size)
+        self.fg = nn.Linear(embed_size, embed_size)
 
-    def forward(self, value, key, query, adj):
+    def forward(self, value, key, query):
+                
+        # Spatial Embedding 部分
+        N, T, C = query.shape
+        D_S = self.embed_liner(self.D_S)
+        D_S = D_S.expand(T, N, C)
+        D_S = D_S.permute(1, 0, 2)
         
-        #拼接邻接矩阵
-        #需修改较多维度变换           
-        #adj = adj.expand(query.shape[2], query.shape[0], query.shape[0])  
-        #adj = adj.permute(1, 2, 0)
-        #query = torch.cat((query, adj), dim=1)
         
+        # GCN 部分
+        X_G = torch.Tensor(query.shape[0], 0, query.shape[2])
+        self.adj = self.adj.unsqueeze(0).unsqueeze(0)
+        self.adj = self.norm_adj(self.adj)
+        self.adj = self.adj.squeeze(0).squeeze(0)
+        
+        for t in range(query.shape[1]):
+            o = self.gcn(query[ : , t,  : ],  self.adj)
+            o = o.unsqueeze(1)              # shape [N, 1, C]
+            X_G = torch.cat((X_G, o), dim=1)
+
         
         # Spatial Transformer 部分
+        query = query+D_S
         attention = self.attention(value, key, query)
         # Add skip connection, run through normalization and finally dropout
         x = self.dropout(self.norm1(attention + query))
         forward = self.feed_forward(x)
-        out1 = self.dropout(self.norm2(forward + x))
-        
-        
-        # GCN 部分
-        out2 = torch.Tensor(query.shape[0], 0, query.shape[2])
-        adj = adj.unsqueeze(0).unsqueeze(0)
-        adj = self.norm_adj(adj)
-        adj = adj.squeeze(0).squeeze(0)
-        
-        for t in range(query.shape[1]):
-            o = self.gcn(query[ : , t,  : ],  adj)
-            o = o.unsqueeze(1)              # shape [N, 1, C]
-            out2 = torch.cat((out2, o), dim=1)
-        
+        U_S = self.dropout(self.norm2(forward + x))
+
         
         # 融合 STransformer and GCN
-        g = torch.sigmoid( self.out1_fc(out1) + self.out2_fc(out2) )
-        out = g*out1 + (1-g)*out2
+        g = torch.sigmoid( self.fs(U_S) +  self.fg(X_G) )      # (7)
+        out = g*U_S + (1-g)*X_G                                # (8)
 
         return out
     
@@ -199,11 +205,11 @@ class TTransformer(nn.Module):
         )
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, value, key, query, i):
-        onehot_encoder = self.one_hot(i, N=query.shape[0], T=query.shape[1])      
+    def forward(self, value, key, query, t):
+        D_T = self.one_hot(t, N=query.shape[0], T=query.shape[1])      
 
         # temporal embedding加到query。 原论文采用concatenated
-        query = query + onehot_encoder  
+        query = query + D_T  
         
         attention = self.attention(value, key, query)
 
@@ -215,18 +221,18 @@ class TTransformer(nn.Module):
 
 
 class STTransformerBlock(nn.Module):
-    def __init__(self, embed_size, heads, time_num, dropout, forward_expansion):
+    def __init__(self, embed_size, heads, adj, time_num, dropout, forward_expansion):
         super(STTransformerBlock, self).__init__()
-        self.STransformer = STransformer(embed_size, heads, dropout, forward_expansion)
+        self.STransformer = STransformer(embed_size, heads, adj, dropout, forward_expansion)
         self.TTransformer = TTransformer(embed_size, heads, time_num, dropout, forward_expansion)
         self.norm1 = nn.LayerNorm(embed_size)
         self.norm2 = nn.LayerNorm(embed_size)
         self.dropout = nn.Dropout(dropout)
     
-    def forward(self, value, key, query, adj, i):
+    def forward(self, value, key, query, t):
         # Add skip connection,run through normalization and finally dropout
-        x1 = self.norm1(self.STransformer(value, key, query, adj) + query)
-        x2 = self.dropout( self.norm2(self.TTransformer(x1, x1, x1, i) + x1) )
+        x1 = self.norm1(self.STransformer(value, key, query) + query)
+        x2 = self.dropout( self.norm2(self.TTransformer(x1, x1, x1, t) + x1) )
         return x2
 
 class Encoder(nn.Module):
@@ -236,6 +242,7 @@ class Encoder(nn.Module):
         embed_size,
         num_layers,
         heads,
+        adj,
         time_num,
         device,
         forward_expansion,
@@ -250,6 +257,7 @@ class Encoder(nn.Module):
                 STTransformerBlock(
                     embed_size,
                     heads,
+                    adj,
                     time_num,
                     dropout=dropout,
                     forward_expansion=forward_expansion
@@ -260,16 +268,17 @@ class Encoder(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, adj, i):
+    def forward(self, x, t):
         out = self.dropout(x)        
         # In the Encoder the query, key, value are all the same.
         for layer in self.layers:
-            out = layer(out, out, out, adj, i)
+            out = layer(out, out, out, t)
         return out     
     
 class Transformer(nn.Module):
     def __init__(
         self,
+        adj,
         embed_size=64,
         num_layers=3,
         heads=2,
@@ -283,6 +292,7 @@ class Transformer(nn.Module):
             embed_size,
             num_layers,
             heads,
+            adj,
             time_num,
             device,
             forward_expansion,
@@ -290,26 +300,28 @@ class Transformer(nn.Module):
         )
         self.device = device
 
-    def forward(self, src, adj, i):
-        enc_src = self.encoder(src, adj, i)
+    def forward(self, src, t):
+        enc_src = self.encoder(src, t)
         return enc_src
 
 
 class STTransformer(nn.Module):
     def __init__(
         self, 
+        adj,
         in_channels = 1, 
         embed_size = 64, 
         time_num = 288,
         num_layers = 3,
         T_dim = 12,
         output_T_dim = 3,  
-        heads = 2,
+        heads = 2,        
     ):        
         super(STTransformer, self).__init__()
         # 第一次卷积扩充通道数
         self.conv1 = nn.Conv2d(in_channels, embed_size, 1)
         self.Transformer = Transformer(
+            adj,
             embed_size, 
             num_layers, 
             heads, 
@@ -322,7 +334,7 @@ class STTransformer(nn.Module):
         self.conv3 = nn.Conv2d(embed_size, 1, 1)
         self.relu = nn.ReLU()
     
-    def forward(self, x, adj, i):
+    def forward(self, x, t):
         # input x shape[ C, N, T] 
         # C:通道数量。  N:传感器数量。  T:时间数量
         
@@ -332,7 +344,7 @@ class STTransformer(nn.Module):
         input_Transformer = input_Transformer.permute(1, 2, 0)  
         
         #input_Transformer shape[N, T, C]
-        output_Transformer = self.Transformer(input_Transformer, adj, i)  
+        output_Transformer = self.Transformer(input_Transformer, t)  
         output_Transformer = output_Transformer.permute(1, 0, 2)
         #output_Transformer shape[T, N, C]
         
