@@ -64,7 +64,7 @@ if __name__ == "__main__":
     
     
     #   ----训练部分----
-    # i表示遍历到的具体时间
+    # 4表示遍历到的具体时间
     for t in range(train_num - 21):
         x = v[:, t:t+12]
         x = x.unsqueeze(0)        
