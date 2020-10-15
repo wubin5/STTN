@@ -50,18 +50,18 @@ if __name__ == "__main__":
     criterion3 = nn.MSELoss()   #RMSE
     
     
-    for i in range( train_num , row_num-21  ):
-        x = v[:, i:i+12]
+    for t in range( train_num , row_num-21  ):
+        x = v[:, t:t+12]
         x = x.unsqueeze(0)
-        y = v[:, i+14:i+21:3]
+        y = v[:, t+14:t+21:3]
         
-        out = model(x, A, i)
+        out = model(x, t)
                 
         loss1 = criterion1(out, y ) 
         loss2 = MAE(out, y)
         loss3 = torch.sqrt(criterion3(out, y ) )
         
-        if i%100 == 0:
+        if t%100 == 0:
             print("MAE loss", loss1)
             print("MAE loss2:", loss2)
             print("RMSE loss", loss3)
