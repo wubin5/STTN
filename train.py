@@ -9,13 +9,14 @@ import torch.nn as nn
 from ST_Transformer import STTransformer
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     days = 10       #选择训练的天数
-    val_days = 1    #选择验证的天数
+    val_days = 3    #选择验证的天数
     
     train_num = 288*days
     val_num = 288*val_days
@@ -65,6 +66,9 @@ if __name__ == "__main__":
     
     #   ----训练部分----
     # t表示遍历到的具体时间
+    pltx=[]
+    plty=[]
+
     for t in range(train_num - 21):
         x = v[:, t:t+12]
         x = x.unsqueeze(0)        
@@ -83,6 +87,15 @@ if __name__ == "__main__":
         loss.backward() 
         optimizer.step() 
         
+        pltx.append(t)
+        plty.append(loss.detach().numpy())
+    
+    plt.plot(pltx, plty, label="STTN train")
+    plt.title("ST-Transformer train")
+    plt.xlabel("t")
+    plt.ylabel("MAE loss")
+    plt.legend()
+    plt.show() 
     
     
     
