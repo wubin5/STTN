@@ -102,7 +102,8 @@ class TSelfAttention(nn.Module):
         # queries shape: (N, T, heads, heads_dim),
         # keys shape: (N, T, heads, heads_dim)
         # energy: (N, T, T, heads)
-
+        
+        
         # Normalize energy values similarly to seq2seq + attention
         # so that they sum to 1. Also divide by scaling factor for
         # better stability
@@ -192,7 +193,10 @@ class TTransformer(nn.Module):
         
         # Temporal embedding One hot
         self.time_num = time_num
-        self.one_hot = One_hot_encoder(embed_size, time_num)
+        self.one_hot = One_hot_encoder(embed_size, time_num)          # temporal embedding选用one-hot方式 或者
+        self.temporal_embedding = nn.Embedding(time_num, embed_size)  # temporal embedding选用nn.Embedding
+
+
         
         self.attention = TSelfAttention(embed_size, heads)
         self.norm1 = nn.LayerNorm(embed_size)
@@ -206,7 +210,12 @@ class TTransformer(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, value, key, query, t):
-        D_T = self.one_hot(t, N=query.shape[0], T=query.shape[1])      
+        N, T, C = query.shape
+        
+        D_T = self.one_hot(t, N, T)                          # temporal embedding选用one-hot方式 或者
+        D_T = self.temporal_embedding(torch.arange(0, T))    # temporal embedding选用nn.Embedding
+        D_T = D_T.expand(N, T, C)
+
 
         # temporal embedding加到query。 原论文采用concatenated
         query = query + D_T  
@@ -351,7 +360,7 @@ class STTransformer(nn.Module):
         output_Transformer = output_Transformer.unsqueeze(0)     
         out = self.relu(self.conv2(output_Transformer))    # 等号左边 out shape: [1, output_T_dim, N, C]        
         out = out.permute(0, 3, 2, 1)           # 等号左边 out shape: [1, C, N, output_T_dim]
-        out = self.conv3( out )                 # 等号左边 out shape: [1, 1, N, output_T_dim]       
+        out = self.conv3(out)                   # 等号左边 out shape: [1, 1, N, output_T_dim]       
         out = out.squeeze(0).squeeze(0)
         
        
