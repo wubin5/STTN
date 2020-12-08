@@ -1,6 +1,7 @@
 # STTN
 
-Spatial-Temporal Transformer 算法复现
+Spatial-Temporal Transformer算法复现 
+时空transformer算法复现
 
 DataSet：PeMSD7(M)选择前25个sensors
 
